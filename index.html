@@ -9,39 +9,43 @@ index.html
     :root { color-scheme: dark; }
     html, body { height:100%; margin:0; background:#0b0d10; overflow:hidden; }
     canvas#scene { position:fixed; inset:0; width:100vw; height:100vh; display:block; z-index:0; }
+
     .hud{
       position:fixed; left:12px; right:12px; bottom:12px;
-      display:flex; justify-content:space-between;
+      display:flex; justify-content:space-between; align-items:flex-end;
       pointer-events:none; font:12px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-      color:#aab2c0; opacity:.9; z-index:2;
+      color:#aab2c0; opacity:.92; z-index:2;
     }
-    .hud .left{pointer-events:auto}
+    .hud .left{pointer-events:auto; display:flex; flex-wrap:wrap; gap:6px;}
     .chip{
       background:#11161caa; border:1px solid #1e2a35; border-radius:10px;
-      padding:8px 10px; margin:0 6px 0 0; backdrop-filter:blur(6px);
+      padding:8px 10px; backdrop-filter:blur(6px);
     }
-    #err { position:fixed; top:12px; left:12px; z-index:3; color:#ffb4b4; font:12px system-ui; }
+    .muted { opacity:.7 }
   </style>
 </head>
 <body>
   <canvas id="scene"></canvas>
-  <div id="err"></div>
   <div class="hud">
     <div class="left">
-      <span class="chip">R = reseed</span>
-      <span class="chip">C = new palette</span>
-      <span class="chip">P = pause</span>
-      <span class="chip">S = save PNG</span>
+      <span class="chip">1 = High-Energy</span>
+      <span class="chip">2 = Thick Mist</span>
+      <span class="chip">3 = Hypercurl</span>
+      <span class="chip muted">R = reseed</span>
+      <span class="chip muted">C = new palette</span>
+      <span class="chip muted">P = pause</span>
+      <span class="chip muted">S = save PNG</span>
     </div>
     <div class="chip" id="fps">…</div>
   </div>
 
 <script>
-/* ========= SETTINGS ========= */
+/* ========= SETTINGS & PRESETS ========= */
 const SETTINGS = {
-  density: 0.0016,  // particles per pixel
-  step: 0.8,        // particle step size (px)
-  lineWidth: 0.6,   // stroke width
+  // baseline (will be overwritten by presets)
+  density: 0.0016,
+  step: 0.8,
+  lineWidth: 0.6,
   noiseScale: 0.0013,
   fieldSpeed: 0.3,
   fadeAlpha: 0.05,
@@ -54,51 +58,59 @@ const SETTINGS = {
     ["#D1E8E2","#9AD1D4","#6EC5E9","#C490D1","#845EC2"]
   ]
 };
-/* ============================ */
+
+const PRESETS = {
+  "1": { // High-Energy
+    density: 0.0030, step: 1.2, lineWidth: 0.9,
+    noiseScale: 0.0011, fieldSpeed: 0.45, fadeAlpha: 0.035
+  },
+  "2": { // Thick Mist
+    density: 0.0045, step: 0.7, lineWidth: 1.1,
+    noiseScale: 0.0016, fieldSpeed: 0.18, fadeAlpha: 0.02
+  },
+  "3": { // Hypercurl Storm
+    density: 0.0035, step: 1.0, lineWidth: 1.0,
+    noiseScale: 0.0008, fieldSpeed: 0.35, fadeAlpha: 0.03
+  }
+};
+/* ===================================== */
 
 const TAU = Math.PI*2;
 let seed = (Math.random()*1e9)|0;
 let paused = false;
 
 const canvas = document.getElementById('scene');
-const errEl = document.getElementById('err');
 const ctx = canvas.getContext('2d', { alpha: false });
-
-let DPR = Math.max(1, Math.min(2, window.devicePixelRatio||1));
 let W=0, H=0, particles=[], palette = pick(SETTINGS.palettes);
 
 function start(){
-  try {
-    resize();
-    reseed();
-    requestAnimationFrame(loop);
-  } catch(e){ showErr(e); }
+  resize();
+  applyPreset('1');     // start “hot”
+  requestAnimationFrame(loop);
 }
-if (document.readyState === "loading") {
-  window.addEventListener('DOMContentLoaded', start);
-} else {
-  start();
+if (document.readyState === "loading") addEventListener('DOMContentLoaded', start); else start();
+
+/* ---------- Presets ---------- */
+function applyPreset(id){
+  const p = PRESETS[id];
+  if(!p) return;
+  Object.assign(SETTINGS, p);
+  reseed();
+  bumpHUD(`Preset ${id}`);
 }
 
-function showErr(e){
-  errEl.textContent = "Error: " + (e && e.message ? e.message : e);
-}
-
-/* ----- Core ----- */
+/* ---------- Core ---------- */
 function reseed(){
   seed = (Math.random()*1e9)|0;
   palette = pick(SETTINGS.palettes);
   const count = Math.max(200, Math.floor(W*H*SETTINGS.density));
-  particles = new Array(count).fill(0).map(()=>spawnParticle());
+  particles = new Array(count).fill(0).map(()=>({
+    x: Math.random()*W, y: Math.random()*H, hue: pick(palette), life: 0
+  }));
   clear(true);
 }
 
-function spawnParticle(){
-  return { x: Math.random()*W, y: Math.random()*H, hue: pick(palette), life: 0 };
-}
-
 function clear(hard=false){
-  ctx.save();
   ctx.globalAlpha = 1;
   ctx.fillStyle = SETTINGS.bg;
   ctx.fillRect(0,0,W,H);
@@ -111,48 +123,45 @@ function clear(hard=false){
       ctx.fillRect(x,y,1,1);
     }
   }
-  ctx.restore();
+  ctx.globalAlpha = 1;
 }
 
 function loop(t){
-  try{
-    if(!paused){
-      // fade for trails
-      ctx.save();
-      ctx.globalAlpha = SETTINGS.fadeAlpha;
-      ctx.fillStyle = SETTINGS.bg;
-      ctx.fillRect(0,0,W,H);
-      ctx.restore();
+  if(!paused){
+    // trail fade
+    ctx.globalAlpha = SETTINGS.fadeAlpha;
+    ctx.fillStyle = SETTINGS.bg;
+    ctx.fillRect(0,0,W,H);
+    ctx.globalAlpha = 1;
 
-      ctx.lineWidth = SETTINGS.lineWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+    ctx.lineWidth = SETTINGS.lineWidth;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
-      const z = t * 0.001 * SETTINGS.fieldSpeed;
+    const z = t * 0.001 * SETTINGS.fieldSpeed;
+    ctx.globalCompositeOperation = 'lighter';
 
-      ctx.globalCompositeOperation = 'lighter';
-      for(let p of particles){
-        const ax = p.x, ay = p.y;
-        const angle = valueNoise(p.x*SETTINGS.noiseScale, p.y*SETTINGS.noiseScale, z) * TAU*2;
-        p.x += Math.cos(angle) * SETTINGS.step;
-        p.y += Math.sin(angle) * SETTINGS.step;
+    for(let p of particles){
+      const ax = p.x, ay = p.y;
+      const angle = valueNoise(p.x*SETTINGS.noiseScale, p.y*SETTINGS.noiseScale, z) * TAU*2;
+      p.x += Math.cos(angle) * SETTINGS.step;
+      p.y += Math.sin(angle) * SETTINGS.step;
 
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(p.x, p.y);
-        ctx.strokeStyle = withAlpha(p.hue, 0.06 + 0.12*Math.random());
-        ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(p.x, p.y);
+      ctx.strokeStyle = withAlpha(p.hue, 0.06 + 0.12*Math.random());
+      ctx.stroke();
 
-        p.life++;
-        if (p.x< -10 || p.x>W+10 || p.y<-10 || p.y>H+10 || p.life>1500){
-          Object.assign(p, spawnParticle());
-        }
+      p.life++;
+      if (p.x< -10 || p.x>W+10 || p.y<-10 || p.y>H+10 || p.life>1500){
+        p.x = Math.random()*W; p.y = Math.random()*H; p.hue = pick(palette); p.life = 0;
       }
-      ctx.globalCompositeOperation = 'source-over';
     }
-    fpsMeter(t);
-    requestAnimationFrame(loop);
-  } catch(e){ showErr(e); }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  fpsMeter(t);
+  requestAnimationFrame(loop);
 }
 
 /* ----- Value Noise (seeded) ----- */
@@ -177,7 +186,8 @@ function valueNoise(x, y, z=0){
   return lerp(y1, y2, w);
 }
 function hash3(x, y, z){
-  let h = x*374761393 + y*668265263 + z*1442695041 + seed; // reduced constant to stay well in 53-bit range
+  // keep within JS safe integer range
+  let h = x*374761393 + y*668265263 + z*1442695041 + seed;
   h = (h ^ (h >> 13)) * 1274126177;
   h ^= h >> 16;
   return (h >>> 0) / 4294967295;
@@ -197,27 +207,30 @@ function hexToRGB(hex){
   const num = parseInt(hex,16);
   return { r:(num>>16)&255, g:(num>>8)&255, b:num&255 };
 }
+function bumpHUD(msg){
+  const el = document.getElementById('fps');
+  el.textContent = `${msg} • ${el.textContent}`;
+}
 
 /* ----- Size handling ----- */
 function resize(){
-  DPR = Math.max(1, Math.min(2, window.devicePixelRatio||1));
   const w = Math.floor(window.innerWidth);
   const h = Math.floor(window.innerHeight);
-  canvas.width  = Math.floor(w * DPR);
-  canvas.height = Math.floor(h * DPR);
-  canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
-  ctx.setTransform(DPR,0,0,DPR,0,0); // draw in CSS px
+  canvas.width = w; canvas.height = h;
+  canvas.style.width = w + "px"; canvas.style.height = h + "px";
   W = w; H = h;
 }
-window.addEventListener('resize', resize);
+addEventListener('resize', resize);
 
 /* ----- Keys ----- */
-window.addEventListener('keydown', (e)=>{
-  if(e.key==='r' || e.key==='R'){ reseed(); }
-  if(e.key==='c' || e.key==='C'){ palette = pick(SETTINGS.palettes); }
-  if(e.key==='p' || e.key==='P'){ paused = !paused; }
-  if(e.key==='s' || e.key==='S'){ savePNG(); }
+addEventListener('keydown', (e)=>{
+  if(e.key==='1') applyPreset('1');
+  if(e.key==='2') applyPreset('2');
+  if(e.key==='3') applyPreset('3');
+  if(e.key==='r' || e.key==='R') reseed();
+  if(e.key==='c' || e.key==='C'){ palette = pick(SETTINGS.palettes); bumpHUD('Palette'); }
+  if(e.key==='p' || e.key==='P') paused = !paused;
+  if(e.key==='s' || e.key==='S') savePNG();
 });
 
 function savePNG(){
@@ -240,3 +253,4 @@ function fpsMeter(t){
 </script>
 </body>
 </html>
+
